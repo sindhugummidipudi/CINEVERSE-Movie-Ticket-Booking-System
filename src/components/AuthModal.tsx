@@ -1,26 +1,66 @@
 import { useEffect, useState } from 'react';
-import { Film, ShieldCheck, X } from 'lucide-react';
+import { Check, Copy, Film, ShieldCheck, X } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 
 const CITIES = ['Mumbai', 'Bengaluru', 'Chennai', 'Hyderabad', 'New Delhi'];
+
+function formatAuthError(err: unknown): {
+  message: string;
+  isDomainIssue: boolean;
+} {
+  const code = (err as { code?: string })?.code || '';
+  const rawMessage = err instanceof Error ? err.message : '';
+
+  if (
+    code === 'auth/unauthorized-domain' ||
+    rawMessage.includes('auth/unauthorized-domain')
+  ) {
+    return {
+      isDomainIssue: true,
+      message:
+        'Google Sign-In is not enabled for this web address yet. You can Login or Create Account with Email & Password above — it works on every link.',
+    };
+  }
+  if (code === 'auth/popup-blocked' || rawMessage.includes('popup-blocked')) {
+    return {
+      isDomainIssue: false,
+      message:
+        'Your browser blocked the Google popup. Please allow popups for this site or use Email & Password Login above.',
+    };
+  }
+  if (
+    code === 'auth/popup-closed-by-user' ||
+    code === 'auth/cancelled-popup-request'
+  ) {
+    return {
+      isDomainIssue: false,
+      message: 'Google sign-in was cancelled. Try again or use Email & Password.',
+    };
+  }
+  return {
+    isDomainIssue: false,
+    message: rawMessage || 'Sign-in could not be completed.',
+  };
+}
 
 export function AuthModal({
   isOpen,
   initialMode = 'login',
   onClose,
   onSignedIn,
-  onError,
 }: {
   isOpen: boolean;
   initialMode?: 'login' | 'register';
   onClose: () => void;
   onSignedIn: (msg: string) => void;
-  onError: (msg: string) => void;
+  onError?: (msg: string) => void;
 }) {
   const { signInWithGoogle, loginWithEmail, registerWithEmail } = useAuth();
   const [mode, setMode] = useState<'login' | 'register'>(initialMode);
   const [submitting, setSubmitting] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
+  const [isDomainIssue, setIsDomainIssue] = useState(false);
+  const [copiedDomain, setCopiedDomain] = useState(false);
 
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
@@ -28,27 +68,43 @@ export function AuthModal({
   const [preferredCity, setPreferredCity] = useState('Hyderabad');
   const [password, setPassword] = useState('');
 
+  const currentHostname =
+    typeof window !== 'undefined' ? window.location.hostname : '';
+
   useEffect(() => {
     if (isOpen) {
       setMode(initialMode);
       setLocalError(null);
+      setIsDomainIssue(false);
+      setCopiedDomain(false);
     }
   }, [isOpen, initialMode]);
 
   if (!isOpen) return null;
 
+  const handleCopyHostname = async () => {
+    if (!currentHostname) return;
+    try {
+      await navigator.clipboard.writeText(currentHostname);
+      setCopiedDomain(true);
+      setTimeout(() => setCopiedDomain(false), 2000);
+    } catch {
+      // Ignore clipboard failures in restricted environments
+    }
+  };
+
   const handleGoogleLogin = async () => {
     setLocalError(null);
+    setIsDomainIssue(false);
     setSubmitting(true);
     try {
       const user = await signInWithGoogle();
       onSignedIn(`Welcome back, ${user?.name || 'Guest'}.`);
       onClose();
     } catch (err: unknown) {
-      const message =
-        err instanceof Error ? err.message : 'Sign-in could not be completed.';
-      setLocalError(message);
-      onError(message);
+      const parsed = formatAuthError(err);
+      setLocalError(parsed.message);
+      setIsDomainIssue(parsed.isDomainIssue);
     } finally {
       setSubmitting(false);
     }
@@ -57,6 +113,7 @@ export function AuthModal({
   const handleEmailSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLocalError(null);
+    setIsDomainIssue(false);
     setSubmitting(true);
     try {
       if (mode === 'register') {
@@ -78,7 +135,6 @@ export function AuthModal({
       const message =
         err instanceof Error ? err.message : 'Authentication failed.';
       setLocalError(message);
-      onError(message);
     } finally {
       setSubmitting(false);
     }
@@ -127,6 +183,7 @@ export function AuthModal({
             onClick={() => {
               setMode('login');
               setLocalError(null);
+              setIsDomainIssue(false);
             }}
             className={`py-2 rounded-lg text-xs font-semibold transition-colors ${
               mode === 'login'
@@ -141,6 +198,7 @@ export function AuthModal({
             onClick={() => {
               setMode('register');
               setLocalError(null);
+              setIsDomainIssue(false);
             }}
             className={`py-2 rounded-lg text-xs font-semibold transition-colors ${
               mode === 'register'
@@ -237,9 +295,44 @@ export function AuthModal({
           </div>
 
           {localError && (
-            <p className="text-xs text-red-300 bg-red-950/50 border border-red-500/30 rounded-lg px-3 py-2">
-              {localError}
-            </p>
+            <div
+              className={`text-xs rounded-xl px-3.5 py-2.5 space-y-2 border ${
+                isDomainIssue
+                  ? 'text-[#F5E7C4] bg-[#241B0D] border-[#D4AF37]/40'
+                  : 'text-red-300 bg-red-950/50 border-red-500/30'
+              }`}
+            >
+              <p className="leading-relaxed">{localError}</p>
+              {isDomainIssue && currentHostname && (
+                <div className="pt-1.5 border-t border-[#D4AF37]/20 space-y-1.5 text-[11px] text-[#D6D0C6]">
+                  <p>
+                    App owner setup: add this domain under Firebase Console → Authentication → Settings → Authorized domains:
+                  </p>
+                  <div className="flex items-center justify-between gap-2 bg-[#0C0B0E] border border-white/10 rounded-lg px-2.5 py-1.5">
+                    <code className="font-mono text-[10px] text-[#D4AF37] truncate">
+                      {currentHostname}
+                    </code>
+                    <button
+                      type="button"
+                      onClick={handleCopyHostname}
+                      className="inline-flex items-center gap-1 shrink-0 text-[11px] font-medium text-[#F5F2EB] hover:text-[#D4AF37] cursor-pointer"
+                    >
+                      {copiedDomain ? (
+                        <>
+                          <Check className="w-3 h-3 text-emerald-400" />
+                          Copied
+                        </>
+                      ) : (
+                        <>
+                          <Copy className="w-3 h-3" />
+                          Copy
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
           )}
 
           <button

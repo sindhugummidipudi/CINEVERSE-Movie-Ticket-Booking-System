@@ -65,7 +65,8 @@ export const requireAuth = async (
     const dbUser = await getOrCreateUser(
       decodedToken.uid,
       email,
-      decodedToken.name
+      decodedToken.name,
+      { linkByEmail: decodedToken.email_verified === true }
     );
     req.dbUser = dbUser;
     next();

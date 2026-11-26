@@ -16,15 +16,19 @@ export function isConfiguredAdminEmail(email: string): boolean {
 
 export function sanitizeUser<T extends { passwordHash?: string | null }>(
   user: T
-): Omit<T, 'passwordHash'> {
-  const { passwordHash: _omitted, ...safe } = user;
-  return safe;
+): Omit<T, 'passwordHash'> & { hasPassword: boolean } {
+  const { passwordHash, ...safe } = user;
+  return {
+    ...safe,
+    hasPassword: Boolean(passwordHash),
+  };
 }
 
 export async function getOrCreateUser(
   uid: string,
   email: string,
-  displayName?: string
+  displayName?: string,
+  options?: { linkByEmail?: boolean }
 ) {
   try {
     const normalizedEmail = email.trim().toLowerCase();
@@ -47,6 +51,21 @@ export async function getOrCreateUser(
         return sanitizeUser(updated[0]);
       }
       return sanitizeUser(current);
+    }
+
+    if (options?.linkByEmail && normalizedEmail.includes('@')) {
+      const existingByEmail = await findUserByEmail(normalizedEmail);
+      if (existingByEmail) {
+        if (isAdminEmail && existingByEmail.role !== 'admin') {
+          const updated = await db
+            .update(users)
+            .set({ role: 'admin' })
+            .where(eq(users.id, existingByEmail.id))
+            .returning();
+          return sanitizeUser(updated[0]);
+        }
+        return sanitizeUser(existingByEmail);
+      }
     }
 
     const inserted = await db
@@ -90,6 +109,24 @@ export async function findUserById(id: number) {
     .where(eq(users.id, id))
     .limit(1);
   return rows[0] ? sanitizeUser(rows[0]) : null;
+}
+
+export async function findUserRowById(id: number) {
+  const rows = await db
+    .select()
+    .from(users)
+    .where(eq(users.id, id))
+    .limit(1);
+  return rows[0] || null;
+}
+
+export async function updateUserPasswordHash(userId: number, passwordHash: string) {
+  const [updated] = await db
+    .update(users)
+    .set({ passwordHash })
+    .where(eq(users.id, userId))
+    .returning();
+  return updated ? sanitizeUser(updated) : null;
 }
 
 export async function registerEmailUser(data: {

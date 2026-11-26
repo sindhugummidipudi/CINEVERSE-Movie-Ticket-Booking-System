@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import {
   Download,
+  KeyRound,
   Mail,
   MessageCircle,
   QrCode,
@@ -40,6 +41,11 @@ export function ProfileBookingsView({
   const [phone, setPhone] = useState('');
   const [preferredCity, setPreferredCity] = useState('Mumbai');
   const [savingProfile, setSavingProfile] = useState(false);
+
+  const [currentPassword, setCurrentPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [savingPassword, setSavingPassword] = useState(false);
 
   useEffect(() => {
     if (profile) {
@@ -89,6 +95,40 @@ export function ProfileBookingsView({
       onError('Unable to update profile.');
     } finally {
       setSavingProfile(false);
+    }
+  };
+
+  const handleUpdatePassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (newPassword.length < 6) {
+      onError('Password must be at least 6 characters.');
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      onError('New password and confirmation do not match.');
+      return;
+    }
+    setSavingPassword(true);
+    try {
+      const res = await authFetch('/api/me/password', {
+        method: 'PUT',
+        body: JSON.stringify({ currentPassword, newPassword }),
+      });
+      const json = await res.json();
+      if (!res.ok) {
+        onError(json.error || 'Unable to save password.');
+        return;
+      }
+      setCurrentPassword('');
+      setNewPassword('');
+      setConfirmPassword('');
+      await refreshProfile();
+      onSuccess('Login password saved. You can now sign in with Email & Password on any link.');
+    } catch (err) {
+      console.error(err);
+      onError('Unable to save password.');
+    } finally {
+      setSavingPassword(false);
     }
   };
 
@@ -155,70 +195,147 @@ export function ProfileBookingsView({
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
-        {/* Profile Settings */}
-        <form
-          onSubmit={handleSaveProfile}
-          className="lg:col-span-4 bg-[#141216] border border-white/10 rounded-2xl p-6 space-y-4"
-        >
-          <div>
-            <h2 className="font-display text-2xl font-semibold text-[#F5F2EB]">
-              Account Details
-            </h2>
-            <p className="text-xs text-[#9C958B] mt-0.5">{profile?.email}</p>
-          </div>
-
-          <div>
-            <label className="block text-xs text-[#B5AEA4] mb-1.5">
-              Full Name
-            </label>
-            <input
-              type="text"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              required
-              className="w-full px-3.5 py-2.5 rounded-xl bg-[#0C0B0E] border border-white/10 text-sm text-[#F5F2EB] focus:outline-none focus:border-[#D4AF37]"
-            />
-          </div>
-
-          <div>
-            <label className="block text-xs text-[#B5AEA4] mb-1.5">
-              Phone Number
-            </label>
-            <input
-              type="tel"
-              value={phone}
-              onChange={(e) => setPhone(e.target.value)}
-              placeholder="+91 98765 43210"
-              className="w-full px-3.5 py-2.5 rounded-xl bg-[#0C0B0E] border border-white/10 text-sm text-[#F5F2EB] focus:outline-none focus:border-[#D4AF37]"
-            />
-          </div>
-
-          <div>
-            <label className="block text-xs text-[#B5AEA4] mb-1.5">
-              Preferred City
-            </label>
-            <select
-              value={preferredCity}
-              onChange={(e) => setPreferredCity(e.target.value)}
-              className="w-full px-3.5 py-2.5 rounded-xl bg-[#0C0B0E] border border-white/10 text-sm text-[#F5F2EB] focus:outline-none focus:border-[#D4AF37]"
-            >
-              {CITIES.map((c) => (
-                <option key={c} value={c}>
-                  {c}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <button
-            type="submit"
-            disabled={savingProfile}
-            className="w-full flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl bg-[#D4AF37] text-[#0A090C] font-semibold text-xs hover:bg-[#E5C150] disabled:opacity-50"
+        {/* Profile Settings & Password */}
+        <div className="lg:col-span-4 space-y-5">
+          <form
+            onSubmit={handleSaveProfile}
+            className="bg-[#141216] border border-white/10 rounded-2xl p-6 space-y-4"
           >
-            <Save className="w-4 h-4" />
-            {savingProfile ? 'Saving...' : 'Save Profile'}
-          </button>
-        </form>
+            <div>
+              <h2 className="font-display text-2xl font-semibold text-[#F5F2EB]">
+                Account Details
+              </h2>
+              <p className="text-xs text-[#9C958B] mt-0.5">{profile?.email}</p>
+            </div>
+
+            <div>
+              <label className="block text-xs text-[#B5AEA4] mb-1.5">
+                Full Name
+              </label>
+              <input
+                type="text"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                required
+                className="w-full px-3.5 py-2.5 rounded-xl bg-[#0C0B0E] border border-white/10 text-sm text-[#F5F2EB] focus:outline-none focus:border-[#D4AF37]"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs text-[#B5AEA4] mb-1.5">
+                Phone Number
+              </label>
+              <input
+                type="tel"
+                value={phone}
+                onChange={(e) => setPhone(e.target.value)}
+                placeholder="+91 98765 43210"
+                className="w-full px-3.5 py-2.5 rounded-xl bg-[#0C0B0E] border border-white/10 text-sm text-[#F5F2EB] focus:outline-none focus:border-[#D4AF37]"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs text-[#B5AEA4] mb-1.5">
+                Preferred City
+              </label>
+              <select
+                value={preferredCity}
+                onChange={(e) => setPreferredCity(e.target.value)}
+                className="w-full px-3.5 py-2.5 rounded-xl bg-[#0C0B0E] border border-white/10 text-sm text-[#F5F2EB] focus:outline-none focus:border-[#D4AF37]"
+              >
+                {CITIES.map((c) => (
+                  <option key={c} value={c}>
+                    {c}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <button
+              type="submit"
+              disabled={savingProfile}
+              className="w-full flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl bg-[#D4AF37] text-[#0A090C] font-semibold text-xs hover:bg-[#E5C150] disabled:opacity-50"
+            >
+              <Save className="w-4 h-4" />
+              {savingProfile ? 'Saving...' : 'Save Profile'}
+            </button>
+          </form>
+
+          <form
+            onSubmit={handleUpdatePassword}
+            className="bg-[#141216] border border-white/10 rounded-2xl p-6 space-y-4"
+          >
+            <div>
+              <h2 className="font-display text-xl font-semibold text-[#F5F2EB] flex items-center gap-2">
+                <KeyRound className="w-4 h-4 text-[#D4AF37]" />
+                {profile?.hasPassword ? 'Change Password' : 'Set Email Login Password'}
+              </h2>
+              <p className="text-xs text-[#9C958B] mt-1">
+                {profile?.hasPassword
+                  ? 'Update the password used for Email & Password login.'
+                  : 'Add a password to sign in with Email & Password on any shared link.'}
+              </p>
+            </div>
+
+            {profile?.hasPassword && (
+              <div>
+                <label className="block text-xs text-[#B5AEA4] mb-1.5">
+                  Current Password
+                </label>
+                <input
+                  type="password"
+                  value={currentPassword}
+                  onChange={(e) => setCurrentPassword(e.target.value)}
+                  required
+                  className="w-full px-3.5 py-2.5 rounded-xl bg-[#0C0B0E] border border-white/10 text-sm text-[#F5F2EB] focus:outline-none focus:border-[#D4AF37]"
+                />
+              </div>
+            )}
+
+            <div>
+              <label className="block text-xs text-[#B5AEA4] mb-1.5">
+                New Password
+              </label>
+              <input
+                type="password"
+                value={newPassword}
+                onChange={(e) => setNewPassword(e.target.value)}
+                required
+                minLength={6}
+                placeholder="Minimum 6 characters"
+                className="w-full px-3.5 py-2.5 rounded-xl bg-[#0C0B0E] border border-white/10 text-sm text-[#F5F2EB] focus:outline-none focus:border-[#D4AF37]"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs text-[#B5AEA4] mb-1.5">
+                Confirm New Password
+              </label>
+              <input
+                type="password"
+                value={confirmPassword}
+                onChange={(e) => setConfirmPassword(e.target.value)}
+                required
+                minLength={6}
+                placeholder="Re-enter password"
+                className="w-full px-3.5 py-2.5 rounded-xl bg-[#0C0B0E] border border-white/10 text-sm text-[#F5F2EB] focus:outline-none focus:border-[#D4AF37]"
+              />
+            </div>
+
+            <button
+              type="submit"
+              disabled={savingPassword}
+              className="w-full flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl border border-white/15 bg-[#0C0B0E] text-[#F5F2EB] font-semibold text-xs hover:border-[#D4AF37]/60 disabled:opacity-50"
+            >
+              <KeyRound className="w-3.5 h-3.5 text-[#D4AF37]" />
+              {savingPassword
+                ? 'Saving...'
+                : profile?.hasPassword
+                  ? 'Update Password'
+                  : 'Save Password'}
+            </button>
+          </form>
+        </div>
 
         {/* Booking History */}
         <div className="lg:col-span-8 space-y-4">

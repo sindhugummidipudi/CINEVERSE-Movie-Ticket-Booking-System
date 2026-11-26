@@ -12,7 +12,91 @@ import {
   signOut,
 } from 'firebase/auth';
 import { auth, googleAuthProvider } from '../lib/firebase';
+import firebaseConfig from '../../firebase-applet-config.json';
 import type { UserProfile } from '../types';
+
+interface GoogleTokenResponse {
+  access_token?: string;
+  error?: string;
+}
+
+interface GoogleOAuthWindow extends Window {
+  google?: {
+    accounts?: {
+      oauth2?: {
+        initTokenClient: (config: {
+          client_id: string;
+          scope: string;
+          callback: (response: GoogleTokenResponse) => void;
+          error_callback?: (error: { type?: string }) => void;
+        }) => { requestAccessToken: (overrideConfig?: { prompt?: string }) => void };
+      };
+    };
+  };
+}
+
+function loadGoogleIdentityScript(): Promise<void> {
+  if (typeof window === 'undefined') {
+    return Promise.reject(new Error('Browser window unavailable.'));
+  }
+  const win = window as GoogleOAuthWindow;
+  if (win.google?.accounts?.oauth2) {
+    return Promise.resolve();
+  }
+  return new Promise((resolve, reject) => {
+    const existing = document.querySelector<HTMLScriptElement>(
+      'script[data-cineverse-gsi="true"]'
+    );
+    if (existing) {
+      existing.addEventListener('load', () => resolve(), { once: true });
+      existing.addEventListener(
+        'error',
+        () => reject(new Error('Could not load Google Sign-In script.')),
+        { once: true }
+      );
+      return;
+    }
+    const script = document.createElement('script');
+    script.src = 'https://accounts.google.com/gsi/client';
+    script.async = true;
+    script.defer = true;
+    script.dataset.cineverseGsi = 'true';
+    script.onload = () => resolve();
+    script.onerror = () => reject(new Error('Could not load Google Sign-In script.'));
+    document.head.appendChild(script);
+  });
+}
+
+async function requestGoogleOAuthToken(clientId: string): Promise<string> {
+  await loadGoogleIdentityScript();
+  const win = window as GoogleOAuthWindow;
+  const initTokenClient = win.google?.accounts?.oauth2?.initTokenClient;
+  if (!initTokenClient) {
+    throw new Error('Google Sign-In client is unavailable.');
+  }
+  return new Promise<string>((resolve, reject) => {
+    let settled = false;
+    const client = initTokenClient({
+      client_id: clientId,
+      scope: 'openid email profile',
+      callback: (response) => {
+        if (settled) return;
+        settled = true;
+        if (response.access_token) {
+          resolve(response.access_token);
+        } else {
+          reject(new Error(response.error || 'Google authorization did not complete.'));
+        }
+      },
+      error_callback: (err) => {
+        if (settled) return;
+        settled = true;
+        reject(new Error(err.type || 'Google popup could not be opened.'));
+      },
+    });
+    client.requestAccessToken({ prompt: 'select_account' });
+  });
+}
 
 export interface RegisterEmailInput {
   name: string;
@@ -80,12 +164,51 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [fetchBackendProfile]);
 
   const signInWithGoogle = useCallback(async () => {
-    const cred = await signInWithPopup(auth, googleAuthProvider);
-    const token = await cred.user.getIdToken();
-    setCustomToken(null);
-    setFirebaseUser(cred.user);
-    setIdToken(token);
-    return await fetchBackendProfile(token);
+    try {
+      const cred = await signInWithPopup(auth, googleAuthProvider);
+      const token = await cred.user.getIdToken();
+      setCustomToken(null);
+      setFirebaseUser(cred.user);
+      setIdToken(token);
+      return await fetchBackendProfile(token);
+    } catch (err: unknown) {
+      const fbErr = err as { code?: string; message?: string };
+      const isUnauthorizedDomain =
+        fbErr?.code === 'auth/unauthorized-domain' ||
+        (fbErr?.message || '').includes('auth/unauthorized-domain');
+
+      const oauthClientId = (firebaseConfig as { oAuthClientId?: string })
+        .oAuthClientId;
+
+      if (isUnauthorizedDomain && oauthClientId) {
+        try {
+          const accessToken = await requestGoogleOAuthToken(oauthClientId);
+          const res = await fetch('/api/auth/google-oauth', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ accessToken }),
+          });
+          const json = await res.json();
+          if (!res.ok) {
+            throw new Error(json.error || 'Google sign-in failed.');
+          }
+          setFirebaseUser(null);
+          setIdToken(null);
+          setCustomToken(json.token);
+          setProfile(json.user);
+          return json.user as UserProfile;
+        } catch (fallbackErr) {
+          const domainError = new Error(
+            'Google Sign-In is not authorized on this domain yet. Please use Email & Password Login or Create Account above.'
+          ) as Error & { code?: string; cause?: unknown };
+          domainError.code = 'auth/unauthorized-domain';
+          domainError.cause = fallbackErr;
+          throw domainError;
+        }
+      }
+
+      throw err;
+    }
   }, [fetchBackendProfile]);
 
   const loginWithEmail = useCallback(

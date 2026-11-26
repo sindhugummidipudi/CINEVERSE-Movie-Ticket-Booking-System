@@ -18,11 +18,15 @@ import {
   theatres,
   users,
 } from './src/db/schema.ts';
+import firebaseConfig from './firebase-applet-config.json' with { type: 'json' };
 import { ensureSeeded, generateSeatsForScreen } from './src/db/seed.ts';
 import {
   findUserByEmail,
+  findUserRowById,
+  getOrCreateUser,
   registerEmailUser,
   sanitizeUser,
+  updateUserPasswordHash,
   updateUserProfile,
 } from './src/db/users.ts';
 import {
@@ -332,6 +336,68 @@ app.post('/api/auth/login', async (req, res) => {
   }
 });
 
+// Public: Google OAuth Token Fallback (for environments using OAuth Client ID directly)
+app.post('/api/auth/google-oauth', async (req, res) => {
+  try {
+    const { accessToken } = req.body || {};
+    if (!accessToken || typeof accessToken !== 'string' || accessToken.length > 4096) {
+      return res.status(400).json({ error: 'Invalid Google sign-in token.' });
+    }
+
+    const expectedClientId = (firebaseConfig as { oAuthClientId?: string }).oAuthClientId;
+    if (!expectedClientId) {
+      return res.status(503).json({ error: 'Google OAuth client is not configured.' });
+    }
+
+    const tokenInfoUrl = new URL('https://oauth2.googleapis.com/tokeninfo');
+    tokenInfoUrl.searchParams.set('access_token', accessToken);
+    const tokenInfoRes = await fetch(tokenInfoUrl.toString());
+    if (!tokenInfoRes.ok) {
+      return res.status(401).json({ error: 'Google sign-in token could not be verified.' });
+    }
+
+    const tokenInfo = (await tokenInfoRes.json()) as {
+      aud?: string;
+      azp?: string;
+      email?: string;
+      email_verified?: string | boolean;
+      sub?: string;
+    };
+
+    const clientMatches =
+      tokenInfo.aud === expectedClientId || tokenInfo.azp === expectedClientId;
+    const isVerified =
+      tokenInfo.email_verified === true || tokenInfo.email_verified === 'true';
+
+    if (!clientMatches || !isVerified || !tokenInfo.email) {
+      return res.status(401).json({ error: 'Google account verification failed.' });
+    }
+
+    let displayName = tokenInfo.email.split('@')[0];
+    let subject = tokenInfo.sub || tokenInfo.email;
+    const userInfoRes = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    if (userInfoRes.ok) {
+      const profile = (await userInfoRes.json()) as { name?: string; sub?: string };
+      if (profile.name) displayName = profile.name;
+      if (profile.sub) subject = profile.sub;
+    }
+
+    const user = await getOrCreateUser(
+      `google-${subject}`,
+      tokenInfo.email,
+      displayName,
+      { linkByEmail: true }
+    );
+    const token = signSessionToken(user.id, user.email);
+    res.json({ token, user });
+  } catch (error) {
+    console.error('Google OAuth fallback failed:', error);
+    res.status(500).json({ error: 'Unable to complete Google sign-in.' });
+  }
+});
+
 // Authenticated: User Profile
 app.get('/api/me', requireAuth, async (req: AuthRequest, res) => {
   res.json(req.dbUser);
@@ -355,6 +421,46 @@ app.put('/api/me', requireAuth, async (req: AuthRequest, res) => {
   } catch (error) {
     console.error('Failed to update profile:', error);
     res.status(500).json({ error: 'Unable to update profile.' });
+  }
+});
+
+app.put('/api/me/password', requireAuth, async (req: AuthRequest, res) => {
+  try {
+    const { currentPassword, newPassword } = req.body || {};
+    if (
+      !newPassword ||
+      typeof newPassword !== 'string' ||
+      newPassword.length < 6 ||
+      newPassword.length > 128
+    ) {
+      return res
+        .status(400)
+        .json({ error: 'New password must be between 6 and 128 characters.' });
+    }
+
+    const userRow = await findUserRowById(req.dbUser!.id);
+    if (!userRow) {
+      return res.status(404).json({ error: 'Account not found.' });
+    }
+
+    if (userRow.passwordHash) {
+      if (
+        !currentPassword ||
+        typeof currentPassword !== 'string' ||
+        !verifyPassword(currentPassword, userRow.passwordHash)
+      ) {
+        return res.status(401).json({ error: 'Current password is incorrect.' });
+      }
+    }
+
+    const updated = await updateUserPasswordHash(
+      userRow.id,
+      hashPassword(newPassword)
+    );
+    res.json({ success: true, user: updated });
+  } catch (error) {
+    console.error('Failed to update password:', error);
+    res.status(500).json({ error: 'Unable to update login password.' });
   }
 });
 

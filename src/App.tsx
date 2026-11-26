@@ -202,7 +202,7 @@ function CineverseApp() {
           <PaymentView
             checkout={pendingCheckout}
             onBack={() => navigate('seats')}
-            onOpenAuthModal={() => setAuthModalOpen(true)}
+            onOpenAuthModal={() => openAuthModal('login')}
             onSuccess={handleBookingSuccess}
             onError={(msg) => pushToast('error', msg)}
           />
@@ -218,7 +218,7 @@ function CineverseApp() {
 
         {activeView === 'bookings' && (
           <ProfileBookingsView
-            onOpenAuthModal={() => setAuthModalOpen(true)}
+            onOpenAuthModal={() => openAuthModal('login')}
             onBrowseMovies={() => navigate('movies')}
             onOpenAdmin={() => navigate('admin')}
             onSuccess={(msg) => pushToast('success', msg)}
@@ -228,7 +228,7 @@ function CineverseApp() {
 
         {activeView === 'admin' && (
           <AdminDashboardView
-            onOpenAuthModal={() => setAuthModalOpen(true)}
+            onOpenAuthModal={() => openAuthModal('login')}
             onCatalogMutated={loadMovies}
             onSuccess={(msg) => pushToast('success', msg)}
             onError={(msg) => pushToast('error', msg)}

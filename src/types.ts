@@ -153,6 +153,7 @@ export interface UserProfile {
   phone: string;
   preferredCity: string;
   role: 'user' | 'admin';
+  hasPassword?: boolean;
   createdAt?: string;
 }
 
