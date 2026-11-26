@@ -37,7 +37,7 @@ export const requireAuth = async (
 
   // Check signed server session token first (for Email + Password accounts)
   if (token.startsWith('cv1.')) {
-    const session = verifySessionToken(token);
+    const session = await verifySessionToken(token);
     if (!session) {
       return res.status(401).json({ error: 'Invalid or expired session. Please sign in again.' });
     }

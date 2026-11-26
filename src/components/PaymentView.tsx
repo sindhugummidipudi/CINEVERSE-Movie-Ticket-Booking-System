@@ -10,6 +10,7 @@ import {
   Smartphone,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
+import { parseJsonResponse } from '../lib/http';
 import type { BookingRecord } from '../types';
 import type { PendingCheckout } from './SeatSelectionView';
 
@@ -144,15 +145,15 @@ export function PaymentView({
           paymentConfirmed,
         }),
       });
-      const json = await res.json();
-      if (!res.ok) {
-        const errMsg = json.error || 'Payment failed. Please try again.';
+      const parsed = await parseJsonResponse<{ booking: BookingRecord }>(res);
+      if (!parsed.ok || !parsed.data?.booking) {
+        const errMsg = parsed.errorMessage || 'Payment failed. Please try again.';
         setPaymentError(errMsg);
         onError(errMsg);
         return;
       }
 
-      onSuccess(json.booking);
+      onSuccess(parsed.data.booking);
     } catch (err) {
       console.error('Payment request failed:', err);
       setPaymentError('Network error while confirming reservation.');

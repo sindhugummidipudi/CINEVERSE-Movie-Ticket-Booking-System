@@ -303,6 +303,20 @@ export function AuthModal({
               }`}
             >
               <p className="leading-relaxed">{localError}</p>
+              {mode === 'register' &&
+                localError.toLowerCase().includes('already exists') && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setMode('login');
+                      setLocalError(null);
+                      setIsDomainIssue(false);
+                    }}
+                    className="inline-flex items-center px-3 py-1 rounded-lg bg-[#D4AF37] text-[#0A090C] font-semibold text-[11px] hover:bg-[#E5C150] transition-colors cursor-pointer"
+                  >
+                    Switch to Login with this email
+                  </button>
+                )}
               {isDomainIssue && currentHostname && (
                 <div className="pt-1.5 border-t border-[#D4AF37]/20 space-y-1.5 text-[11px] text-[#D6D0C6]">
                   <p>

@@ -286,15 +286,16 @@ app.post('/api/auth/register', async (req, res) => {
       return res.status(400).json({ error: 'Password must be at least 6 characters.' });
     }
 
+    const passwordHash = await hashPassword(password);
     const user = await registerEmailUser({
       name,
       email,
-      passwordHash: hashPassword(password),
+      passwordHash,
       phone: typeof phone === 'string' ? phone : '',
       preferredCity: typeof preferredCity === 'string' ? preferredCity : 'Mumbai',
     });
 
-    const token = signSessionToken(user.id, user.email);
+    const token = await signSessionToken(user.id, user.email);
     res.status(201).json({ token, user });
   } catch (error: unknown) {
     const err = error as Error & { statusCode?: number };
@@ -323,12 +324,12 @@ app.post('/api/auth/login', async (req, res) => {
         error: 'This account uses Google Sign-In. Please click Continue with Google.',
       });
     }
-    if (!verifyPassword(password, userRecord.passwordHash)) {
+    if (!(await verifyPassword(password, userRecord.passwordHash))) {
       return res.status(401).json({ error: 'Invalid email or password.' });
     }
 
     const user = sanitizeUser(userRecord);
-    const token = signSessionToken(user.id, user.email);
+    const token = await signSessionToken(user.id, user.email);
     res.json({ token, user });
   } catch (error) {
     console.error('Login failed:', error);
@@ -390,7 +391,7 @@ app.post('/api/auth/google-oauth', async (req, res) => {
       displayName,
       { linkByEmail: true }
     );
-    const token = signSessionToken(user.id, user.email);
+    const token = await signSessionToken(user.id, user.email);
     res.json({ token, user });
   } catch (error) {
     console.error('Google OAuth fallback failed:', error);
@@ -447,7 +448,7 @@ app.put('/api/me/password', requireAuth, async (req: AuthRequest, res) => {
       if (
         !currentPassword ||
         typeof currentPassword !== 'string' ||
-        !verifyPassword(currentPassword, userRow.passwordHash)
+        !(await verifyPassword(currentPassword, userRow.passwordHash))
       ) {
         return res.status(401).json({ error: 'Current password is incorrect.' });
       }
@@ -455,7 +456,7 @@ app.put('/api/me/password', requireAuth, async (req: AuthRequest, res) => {
 
     const updated = await updateUserPasswordHash(
       userRow.id,
-      hashPassword(newPassword)
+      await hashPassword(newPassword)
     );
     res.json({ success: true, user: updated });
   } catch (error) {
@@ -1350,6 +1351,32 @@ app.put('/api/admin/seats/:id/toggle-block', requireAuth, requireAdmin, async (r
 });
 
 async function startServer() {
+  app.all('/api/*', (_req, res) => {
+    res.status(404).json({ error: 'API endpoint not found.' });
+  });
+
+  app.use(
+    (
+      err: Error & { status?: number; statusCode?: number; type?: string },
+      req: express.Request,
+      res: express.Response,
+      next: express.NextFunction
+    ) => {
+      if (res.headersSent) {
+        return next(err);
+      }
+      if (req.path.startsWith('/api/')) {
+        const status = err.status || err.statusCode || 500;
+        const message =
+          err.type === 'entity.parse.failed'
+            ? 'Invalid JSON request payload.'
+            : 'Internal server error. Please try again.';
+        return res.status(status).json({ error: message });
+      }
+      next(err);
+    }
+  );
+
   const PORT = Number(process.env.PORT) || 3000;
   const isProd = process.env.NODE_ENV === 'production';
 

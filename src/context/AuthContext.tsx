@@ -13,6 +13,7 @@ import {
 } from 'firebase/auth';
 import { auth, googleAuthProvider } from '../lib/firebase';
 import firebaseConfig from '../../firebase-applet-config.json';
+import { fetchJsonWithRetry } from '../lib/http';
 import type { UserProfile } from '../types';
 
 interface GoogleTokenResponse {
@@ -129,15 +130,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [loading, setLoading] = useState(true);
 
   const fetchBackendProfile = useCallback(async (token: string) => {
-    const res = await fetch('/api/me', {
+    const parsed = await fetchJsonWithRetry<UserProfile>('/api/me', {
       headers: { Authorization: `Bearer ${token}` },
     });
-    if (!res.ok) {
-      throw new Error('Failed to sync profile');
+    if (!parsed.ok || !parsed.data) {
+      throw new Error(parsed.errorMessage || 'Failed to sync profile');
     }
-    const data: UserProfile = await res.json();
-    setProfile(data);
-    return data;
+    setProfile(parsed.data);
+    return parsed.data;
   }, []);
 
   useEffect(() => {
@@ -183,20 +183,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (isUnauthorizedDomain && oauthClientId) {
         try {
           const accessToken = await requestGoogleOAuthToken(oauthClientId);
-          const res = await fetch('/api/auth/google-oauth', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ accessToken }),
-          });
-          const json = await res.json();
-          if (!res.ok) {
-            throw new Error(json.error || 'Google sign-in failed.');
+          const parsed = await fetchJsonWithRetry<{ token: string; user: UserProfile }>(
+            '/api/auth/google-oauth',
+            {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ accessToken }),
+            }
+          );
+          if (!parsed.ok || !parsed.data) {
+            throw new Error(parsed.errorMessage || 'Google sign-in failed.');
           }
           setFirebaseUser(null);
           setIdToken(null);
-          setCustomToken(json.token);
-          setProfile(json.user);
-          return json.user as UserProfile;
+          setCustomToken(parsed.data.token);
+          setProfile(parsed.data.user);
+          return parsed.data.user;
         } catch (fallbackErr) {
           const domainError = new Error(
             'Google Sign-In is not authorized on this domain yet. Please use Email & Password Login or Create Account above.'
@@ -213,46 +215,50 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const loginWithEmail = useCallback(
     async (email: string, password: string) => {
-      const res = await fetch('/api/auth/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password }),
-      });
-      const json = await res.json();
-      if (!res.ok) {
-        throw new Error(json.error || 'Unable to sign in.');
+      const parsed = await fetchJsonWithRetry<{ token: string; user: UserProfile }>(
+        '/api/auth/login',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email, password }),
+        }
+      );
+      if (!parsed.ok || !parsed.data) {
+        throw new Error(parsed.errorMessage || 'Unable to sign in.');
       }
       if (auth.currentUser) {
         await signOut(auth).catch(() => {});
       }
       setFirebaseUser(null);
       setIdToken(null);
-      setCustomToken(json.token);
-      setProfile(json.user);
-      return json.user as UserProfile;
+      setCustomToken(parsed.data.token);
+      setProfile(parsed.data.user);
+      return parsed.data.user;
     },
     []
   );
 
   const registerWithEmail = useCallback(
     async (input: RegisterEmailInput) => {
-      const res = await fetch('/api/auth/register', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(input),
-      });
-      const json = await res.json();
-      if (!res.ok) {
-        throw new Error(json.error || 'Unable to create account.');
+      const parsed = await fetchJsonWithRetry<{ token: string; user: UserProfile }>(
+        '/api/auth/register',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(input),
+        }
+      );
+      if (!parsed.ok || !parsed.data) {
+        throw new Error(parsed.errorMessage || 'Unable to create account.');
       }
       if (auth.currentUser) {
         await signOut(auth).catch(() => {});
       }
       setFirebaseUser(null);
       setIdToken(null);
-      setCustomToken(json.token);
-      setProfile(json.user);
-      return json.user as UserProfile;
+      setCustomToken(parsed.data.token);
+      setProfile(parsed.data.user);
+      return parsed.data.user;
     },
     []
   );
